@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VL Dashboard</title>
+  <link rel="stylesheet" href="lib/bootstrap.min.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+
+<!-- ============ Top bar ============ -->
+<nav class="navbar app-bar px-3">
+  <span class="navbar-brand d-flex align-items-center gap-2 mb-0">
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="12" width="4" height="9" rx="1" fill="var(--series-1)"/><rect x="10" y="7" width="4" height="14" rx="1" fill="var(--series-2)"/><rect x="17" y="3" width="4" height="18" rx="1" fill="var(--series-3)"/></svg>
+    <span class="fw-semibold">VL Dashboard</span>
+  </span>
+  <div class="d-flex align-items-center gap-2">
+    <span id="fileBadge" class="small text-secondary d-none"></span>
+    <button id="btnNewFile" class="btn btn-sm btn-outline-secondary d-none" type="button">Load another file</button>
+    <button id="btnTheme" class="btn btn-sm btn-outline-secondary" type="button" aria-label="Toggle dark mode">◐</button>
+  </div>
+</nav>
+
+<!-- ============ Upload screen ============ -->
+<main id="uploadView" class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div id="dropZone" class="drop-zone text-center" tabindex="0" role="button" aria-label="Upload the cleaned Excel file">
+        <svg width="64" height="64" viewBox="0 0 24 24" aria-hidden="true" class="mb-3">
+          <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        </svg>
+        <h1 class="h4 mb-2">Drop the <code>_cleaned.xlsx</code> file here</h1>
+        <p class="text-secondary mb-3">The output file from <strong>Data-Cleaner.py</strong>. It stays on this computer and is never uploaded.</p>
+        <button class="btn btn-primary" type="button" id="btnBrowse">Choose file</button>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+      </div>
+      <div id="loadStatus" class="mt-3 d-none">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <div class="spinner-border spinner-border-sm" role="status"></div>
+          <span id="loadText">Reading file…</span>
+        </div>
+        <div class="progress" style="height:6px"><div id="loadBar" class="progress-bar" style="width:0%"></div></div>
+      </div>
+      <div id="loadError" class="alert alert-danger mt-3 d-none" role="alert"></div>
+
+      <div class="row g-3 mt-4 text-center how-it-works">
+        <div class="col-4"><div class="step-dot">1</div><div class="small">Drop the file</div></div>
+        <div class="col-4"><div class="step-dot">2</div><div class="small">Filter by month, lab or facility</div></div>
+        <div class="col-4"><div class="step-dot">3</div><div class="small">Look up any sample's or patient's timeline</div></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ============ Dashboard ============ -->
+<div id="dashView" class="d-none">
+
+  <!-- Filters: one row, above everything they scope -->
+  <div class="filter-bar px-3 py-2">
+    <div class="d-flex flex-wrap align-items-end gap-2">
+      <div>
+        <label class="form-label small mb-0" for="fMonth">Month</label>
+        <select id="fMonth" class="form-select form-select-sm"></select>
+      </div>
+      <div>
+        <label class="form-label small mb-0" for="fLab">Laboratory</label>
+        <select id="fLab" class="form-select form-select-sm"></select>
+      </div>
+      <div>
+        <label class="form-label small mb-0" for="fFacility">Facility</label>
+        <select id="fFacility" class="form-select form-select-sm"></select>
+      </div>
+      <div>
+        <label class="form-label small mb-0" for="fEntry">Entry</label>
+        <select id="fEntry" class="form-select form-select-sm">
+          <option value="all">Remote &amp; manual</option>
+          <option value="Remote">Remote only</option>
+          <option value="Manual">Manual only</option>
+        </select>
+      </div>
+      <button id="btnReset" class="btn btn-sm btn-link text-decoration-none" type="button">Reset</button>
+      <span id="filterSummary" class="ms-auto small text-secondary align-self-center"></span>
+    </div>
+  </div>
+
+  <div class="container-fluid px-3 pb-5">
+    <ul class="nav nav-underline mt-3 mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOverview" type="button" role="tab">Overview</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabTat" type="button" role="tab">Turnaround</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabBacklog" type="button" role="tab">Backlogs</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabSites" type="button" role="tab">Labs &amp; Facilities</button></li>
+      <li class="nav-item"><button class="nav-link" id="tabTimelineBtn" data-bs-toggle="tab" data-bs-target="#tabTimeline" type="button" role="tab">Timeline</button></li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- ---------- Overview ---------- -->
+      <section class="tab-pane fade show active" id="tabOverview" role="tabpanel">
+        <div class="row g-3" id="kpiRow"></div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-8">
+            <div class="viz-card" data-chart="volume">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title" id="volumeTitle">Samples per month</h2>
+                  <p class="viz-hint" id="volumeHint">Click a bar to focus on that month.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cVolume"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-4">
+            <div class="viz-card" data-chart="status">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Where the samples are</h2>
+                  <p class="viz-hint">Status of every sample in the selection.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div id="statusBars" class="status-bars"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-6">
+            <div class="viz-card" data-chart="outcome">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Viral load results</h2>
+                  <p class="viz-hint">High viral load = 1000 cp/mL or more.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cOutcome"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-6">
+            <div class="viz-card">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">High viral load samples</h2>
+                  <p class="viz-hint">Click a row to open its timeline.</p>
+                </div>
+                <span id="hvlCount" class="badge rounded-pill text-bg-light"></span>
+              </div>
+              <div class="table-scroll"><table class="table table-sm table-hover mb-0" id="hvlTable"></table></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- Turnaround ---------- -->
+      <section class="tab-pane fade" id="tabTat" role="tabpanel">
+        <div class="viz-card">
+          <div class="viz-head">
+            <div>
+              <h2 class="viz-title">The average journey of a sample</h2>
+              <p class="viz-hint">Average days between each step. Negative (bad-date) values are left out.</p>
+            </div>
+          </div>
+          <div id="avgJourney"></div>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-7">
+            <div class="viz-card" data-chart="tatTrend">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title" id="tatTrendTitle">Average days, month by month</h2>
+                  <p class="viz-hint">Lower is better.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cTatTrend"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-5">
+            <div class="viz-card" data-chart="tatHist">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">How long testing took</h2>
+                  <p class="viz-hint">Samples by testing TAT (collection → tested).</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cTatHist"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-6">
+            <div class="viz-card" data-chart="tatEntry">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Remote vs manual</h2>
+                  <p class="viz-hint">Average days for each step, by how the sample was entered.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cTatEntry"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-6">
+            <div class="viz-card" data-chart="tatLab">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Testing TAT by laboratory</h2>
+                  <p class="viz-hint">Average days from collection to testing.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cTatLab"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------- Backlogs ---------- -->
+      <section class="tab-pane fade" id="tabBacklog" role="tabpanel">
+        <div class="viz-card mb-3">
+          <p class="mb-0 small text-secondary" id="blIntro">A <strong>backlog</strong> is a sample collected in a month but not tested in that same month. Rejected samples are not counted. <strong>Transported</strong> means the lab has recorded a reception date.</p>
+        </div>
+        <div class="row g-3" id="blKpis"></div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-7">
+            <div class="viz-card" data-chart="blMonth">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Backlog per collection month</h2>
+                  <p class="viz-hint">Samples not tested in the month they were collected. Click a bar to focus on that month.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cBlMonth"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-5">
+            <div class="viz-card" data-chart="blCarry">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Last month's backlog, tested this month</h2>
+                  <p class="viz-hint">For each month: the backlog carried in from the month before, split into tested this month and still pending at month end.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cBlCarry"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mt-1">
+          <div class="col-xl-6">
+            <div class="viz-card" data-chart="blFate">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">What happened to each month's backlog</h2>
+                  <p class="viz-hint">Tested the next month, tested later, or still not tested.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cBlFate"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-6">
+            <div class="viz-card" data-chart="blLab">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Backlog by laboratory</h2>
+                  <p class="viz-hint" id="blLabHint"></p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cBlLab"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="viz-card mt-3">
+          <div class="viz-head">
+            <div>
+              <h2 class="viz-title">Month by month</h2>
+              <p class="viz-hint">The same figures as the <em>Backlogs</em> sheet of the Excel file.</p>
+            </div>
+          </div>
+          <div class="table-scroll table-scroll-lg"><table class="table table-sm mb-0" id="blTable"></table></div>
+        </div>
+
+        <div class="viz-card mt-3">
+          <div class="viz-head">
+            <div>
+              <h2 class="viz-title" id="blPendingTitle">Backlog samples still not tested</h2>
+              <p class="viz-hint">Oldest first. Click a row to open its timeline.</p>
+            </div>
+            <span id="blPendingCount" class="badge rounded-pill text-bg-light"></span>
+          </div>
+          <div class="table-scroll table-scroll-lg"><table class="table table-sm table-hover mb-0" id="blPendingTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ---------- Labs & facilities ---------- -->
+      <section class="tab-pane fade" id="tabSites" role="tabpanel">
+        <div class="row g-3">
+          <div class="col-xl-5">
+            <div class="viz-card" data-chart="labs">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title">Samples by laboratory</h2>
+                  <p class="viz-hint">Click a bar to filter to that lab.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box"><canvas id="cLabs"></canvas></div>
+            </div>
+          </div>
+          <div class="col-xl-7">
+            <div class="viz-card" data-chart="facilities">
+              <div class="viz-head">
+                <div>
+                  <h2 class="viz-title" id="facTitle">Top facilities by samples sent</h2>
+                  <p class="viz-hint">Click a bar to filter to that facility.</p>
+                </div>
+                <button class="btn btn-sm btn-link table-toggle" type="button">Table</button>
+              </div>
+              <div class="chart-box chart-tall"><canvas id="cFacilities"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="viz-card mt-3">
+          <div class="viz-head">
+            <div>
+              <h2 class="viz-title">Facility scorecard</h2>
+              <p class="viz-hint">Click a column heading to sort. Click a row to see the facility's timeline.</p>
+            </div>
+          </div>
+          <div class="table-scroll table-scroll-lg"><table class="table table-sm table-hover mb-0" id="facTable"></table></div>
+        </div>
+      </section>
+
+      <!-- ---------- Timeline explorer ---------- -->
+      <section class="tab-pane fade" id="tabTimeline" role="tabpanel">
+        <div class="viz-card">
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <div class="btn-group btn-group-sm" role="group" aria-label="What to look up" id="tlKind">
+              <input type="radio" class="btn-check" name="tlKind" id="tlSample" value="sample" checked>
+              <label class="btn btn-outline-primary" for="tlSample">Sample</label>
+              <input type="radio" class="btn-check" name="tlKind" id="tlPatient" value="patient">
+              <label class="btn btn-outline-primary" for="tlPatient">Patient</label>
+              <input type="radio" class="btn-check" name="tlKind" id="tlFacility" value="facility">
+              <label class="btn btn-outline-primary" for="tlFacility">Facility</label>
+              <input type="radio" class="btn-check" name="tlKind" id="tlLab" value="lab">
+              <label class="btn btn-outline-primary" for="tlLab">Laboratory</label>
+            </div>
+            <div class="position-relative flex-grow-1" style="min-width:220px;max-width:480px">
+              <input type="search" id="tlSearch" class="form-control form-control-sm" placeholder="Type a Sample ID or Remote ID…" autocomplete="off">
+              <div id="tlSuggest" class="list-group suggest d-none"></div>
+            </div>
+            <span class="small text-secondary">Timelines show all dates. The filters above don't apply here.</span>
+          </div>
+        </div>
+        <div id="tlResult" class="mt-3">
+          <div class="empty-state text-center text-secondary py-5">
+            <svg width="56" height="56" viewBox="0 0 24 24" aria-hidden="true"><circle cx="4" cy="12" r="2.2" fill="currentColor"/><circle cx="12" cy="12" r="2.2" fill="currentColor"/><circle cx="20" cy="12" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M6.2 12h3.6M14.2 12h3.6" stroke="currentColor" stroke-width="1.5"/></svg>
+            <p class="mt-2 mb-0">Search for something above to see its timeline.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- Table-view modal (accessible alternative to every chart) -->
+<div class="modal fade" id="tableModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h6" id="tableModalTitle"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body"><table class="table table-sm" id="tableModalBody"></table></div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip" class="viz-tooltip" role="tooltip"></div>
+
+<script src="lib/bootstrap.bundle.min.js"></script>
+<script src="lib/chart.umd.min.js"></script>
+<script src="lib/xlsx.full.min.js"></script>
+<script src="js/xlsx-fast.js"></script>
+<script src="js/data.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/timeline.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
