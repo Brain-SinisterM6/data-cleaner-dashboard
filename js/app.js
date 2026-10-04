@@ -13,6 +13,7 @@ const App = (() => {
     view: [],         // records after filters
     filters: { month: "all", lab: "all", facility: "all", entry: "all" },
     fileName: "",
+    source: "",       // "raw" (InteLIS export) or "cleaned" (Data-Cleaner.py output)
     rendered: new Set(), // tabs already drawn for the current filter state
     facSort: { key: "total", dir: -1 },
   };
@@ -66,6 +67,7 @@ const App = (() => {
       $("dashView").classList.add("d-none");
       $("uploadView").classList.remove("d-none");
       $("btnNewFile").classList.add("d-none");
+      $("btnExport").classList.add("d-none");
       $("fileBadge").classList.add("d-none");
     });
   }
@@ -102,6 +104,7 @@ const App = (() => {
           setLoading(true, "Building the dashboard…", Math.round(f * 100)));
         state.all = parsed.records;
         state.fileName = file.name;
+        state.source = parsed.source;
         setLoading(false);
         startDashboard(parsed);
         console.info(`Parsed ${parsed.records.length} records in ${Math.round(performance.now() - t0)} ms`);
@@ -118,8 +121,9 @@ const App = (() => {
     $("uploadView").classList.add("d-none");
     $("dashView").classList.remove("d-none");
     $("btnNewFile").classList.remove("d-none");
+    $("btnExport").classList.remove("d-none");
     const badge = $("fileBadge");
-    badge.textContent = `${state.fileName} · ${state.all.length.toLocaleString()} samples`;
+    badge.textContent = `${state.fileName} · ${state.source === "raw" ? "raw export" : "cleaned file"} · ${state.all.length.toLocaleString()} samples`;
     badge.classList.remove("d-none");
     if (parsed.missing.length) {
       badge.textContent += ` · missing: ${parsed.missing.join(", ")}`;
@@ -189,15 +193,20 @@ const App = (() => {
       (f.lab === "all" || r.lab === f.lab) &&
       (f.facility === "all" || r.facility === f.facility) &&
       (f.entry === "all" || r.entry === f.entry));
-    const parts = [];
-    if (f.month !== "all") parts.push(monthLabel(f.month));
-    if (f.lab !== "all") parts.push(f.lab);
-    if (f.facility !== "all") parts.push(f.facility);
-    if (f.entry !== "all") parts.push(f.entry);
+    const parts = filterParts();
     $("filterSummary").textContent =
       `${state.view.length.toLocaleString()} of ${state.all.length.toLocaleString()} samples` + (parts.length ? ` · ${parts.join(" · ")}` : "");
     state.rendered.clear();
     renderActiveTab();
+  }
+
+  function filterParts() {
+    const f = state.filters, parts = [];
+    if (f.month !== "all") parts.push(monthLabel(f.month));
+    if (f.lab !== "all") parts.push(f.lab);
+    if (f.facility !== "all") parts.push(f.facility);
+    if (f.entry !== "all") parts.push(f.entry);
+    return parts;
   }
 
   // ============================== tab rendering ==============================
@@ -206,14 +215,40 @@ const App = (() => {
     return btn ? btn.getAttribute("data-bs-target").slice(1) : "tabOverview";
   }
 
+  const RENDERERS = { tabOverview: renderOverview, tabTat: renderTat, tabBacklog: renderBacklog, tabSites: renderSites };
+
   function renderActiveTab() {
     const id = activeTabId();
     if (state.rendered.has(id)) return;
     state.rendered.add(id);
-    if (id === "tabOverview") renderOverview();
-    else if (id === "tabTat") renderTat();
-    else if (id === "tabBacklog") renderBacklog();
-    else if (id === "tabSites") renderSites();
+    if (RENDERERS[id]) RENDERERS[id]();
+  }
+
+  /**
+   * For the PDF export: lay out the given tabs all at once in the light theme
+   * with sharp (2x), unanimated charts, run capture(), then put the page back.
+   */
+  async function withExportLayout(tabIds, capture) {
+    const root = document.documentElement;
+    const savedTheme = root.getAttribute("data-theme");
+    const savedDpr = Chart.defaults.devicePixelRatio, savedAnim = Chart.defaults.animation;
+    root.setAttribute("data-theme", "light");
+    applyTheme();
+    Chart.defaults.devicePixelRatio = 2;
+    Chart.defaults.animation = false;
+    document.body.classList.add("exporting");
+    try {
+      for (const id of tabIds) RENDERERS[id]();
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return await capture();
+    } finally {
+      document.body.classList.remove("exporting");
+      Chart.defaults.devicePixelRatio = savedDpr;
+      Chart.defaults.animation = savedAnim;
+      if (savedTheme) root.setAttribute("data-theme", savedTheme); else root.removeAttribute("data-theme");
+      applyTheme();
+      rerender();
+    }
   }
 
   function rerender() {
@@ -911,5 +946,5 @@ const App = (() => {
   }
   document.addEventListener("DOMContentLoaded", init);
 
-  return { openTimeline, kpiRow, attachTip, state };
+  return { openTimeline, kpiRow, attachTip, state, filterParts, withExportLayout };
 })();

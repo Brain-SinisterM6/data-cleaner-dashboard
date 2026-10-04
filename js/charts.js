@@ -126,6 +126,10 @@ const Charts = (() => {
     tables[key] = { title, head, rows };
   }
 
+  function getTable(key) {
+    return tables[key] || null;
+  }
+
   function showTable(key) {
     const t = tables[key];
     if (!t) return;
@@ -142,5 +146,5 @@ const Charts = (() => {
     bootstrap.Modal.getOrCreateInstance(document.getElementById("tableModal")).show();
   }
 
-  return { tokens, applyDefaults, scales, barDataset, lineDataset, render, destroy, destroyWithin, setTable, showTable };
+  return { tokens, applyDefaults, scales, barDataset, lineDataset, render, destroy, destroyWithin, setTable, getTable, showTable };
 })();

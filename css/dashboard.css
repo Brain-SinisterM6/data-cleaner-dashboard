@@ -251,3 +251,13 @@ th.sorted-desc::after { content: " ↓"; color: var(--ink-1); }
 #hvlTable td:nth-child(n+3), #facTable td:nth-child(n+3) { white-space: nowrap; }
 #facTable td:nth-child(2) { font-size: .8rem; color: var(--ink-2); max-width: 280px; }
 .table td { vertical-align: middle; }
+
+/* ------------------------------ PDF export ------------------------------ */
+.export-overlay {
+  position: fixed; inset: 0; z-index: 3000;
+  display: grid; place-items: center;
+  background: var(--page); color: var(--ink-1);
+}
+.export-overlay.d-none { display: none !important; }
+/* While exporting, every tab is laid out at once so all charts can be captured. */
+.exporting #dashView .tab-pane { display: block !important; opacity: 1 !important; }

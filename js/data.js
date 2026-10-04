@@ -1,9 +1,16 @@
 /* ==================================================================
-   data.js - read the Data-Cleaner output workbook into sample records.
+   data.js - read a VL workbook into sample records.
 
-   The dashboard works from the cleaned data sheet(s) (real dates, one row
-   per sample) rather than the summary sheets, so every number can be
+   Accepts either the raw InteLIS VL export or the _cleaned.xlsx made by
+   Data-Cleaner.py. The dashboard works from the data sheet(s) (one row per
+   sample) rather than the cleaner's summary sheets, so every number can be
    recomputed for any month / lab / facility selection.
+
+   Raw exports store dates as text ("21-08-2026", "07-09-2026 13:05"); they
+   are read with the same formats the cleaner converts (dd-mm-yyyy,
+   dd/mm/yyyy, yyyy-mm-dd, with or without a time), so a raw file and its
+   cleaned copy give the same numbers. Banner rows above the headers and
+   trailing blank rows are skipped.
 
    The rules below mirror Data-Cleaner.py so the numbers agree with the
    Statistics sheet:
@@ -238,10 +245,12 @@ const VLData = (() => {
     }
 
     if (!usedSheets.length) {
-      throw new Error("No sample data found. Make sure this is the _cleaned.xlsx file made by Data-Cleaner.py " +
+      throw new Error("No sample data found. Use an InteLIS VL export or the _cleaned.xlsx made by Data-Cleaner.py " +
         "(it needs a sheet with a \"Sample ID\" or \"Remote Sample ID\" column).");
     }
-    return { records, sheets: usedSheets, missing: [...missing], hasSummary };
+    // The cleaner always adds its summary sheets, so without them this is a raw export.
+    const source = hasSummary ? "cleaned" : "raw";
+    return { records, sheets: usedSheets, missing: [...missing], hasSummary, source };
   }
 
   /** SheetJS path: handles every format (.xls too) but blocks while parsing. */
@@ -263,7 +272,7 @@ const VLData = (() => {
   }
 
   /**
-   * Parse the cleaned workbook (Uint8Array). Uses the streaming reader for
+   * Parse a raw or cleaned workbook (Uint8Array). Uses the streaming reader for
    * .xlsx so large files don't freeze the page; falls back to SheetJS.
    * onProgress(fraction) reports progress through the data sheets.
    */

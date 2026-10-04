@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Data Dashboard</title>
+  <title>VL Dashboard</title>
   <link rel="stylesheet" href="lib/bootstrap.min.css">
   <link rel="stylesheet" href="css/dashboard.css">
 </head>
@@ -17,6 +17,7 @@
   </span>
   <div class="d-flex align-items-center gap-2">
     <span id="fileBadge" class="small text-secondary d-none"></span>
+    <button id="btnExport" class="btn btn-sm btn-primary d-none" type="button">Export PDF</button>
     <button id="btnNewFile" class="btn btn-sm btn-outline-secondary d-none" type="button">Load another file</button>
     <button id="btnTheme" class="btn btn-sm btn-outline-secondary" type="button" aria-label="Toggle dark mode">◐</button>
   </div>
@@ -26,13 +27,13 @@
 <main id="uploadView" class="container py-5">
   <div class="row justify-content-center">
     <div class="col-lg-7">
-      <div id="dropZone" class="drop-zone text-center" tabindex="0" role="button" aria-label="Upload the cleaned Excel file">
+      <div id="dropZone" class="drop-zone text-center" tabindex="0" role="button" aria-label="Upload the VL Excel file">
         <svg width="64" height="64" viewBox="0 0 24 24" aria-hidden="true" class="mb-3">
           <path d="M12 16V4m0 0l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/>
         </svg>
-        <h1 class="h4 mb-2">Drop the <code>_cleaned.xlsx</code> file here</h1>
-        <p class="text-secondary mb-3">The output file from <strong>Data-Cleaner.py</strong>. It stays on this computer and is never uploaded.</p>
+        <h1 class="h4 mb-2">Drop the VL Excel file here</h1>
+        <p class="text-secondary mb-3">The raw <strong>InteLIS VL export</strong> or the <code>_cleaned.xlsx</code> from <strong>Data-Cleaner.py</strong>. It stays on this computer and is never uploaded.</p>
         <button class="btn btn-primary" type="button" id="btnBrowse">Choose file</button>
         <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
       </div>
@@ -386,15 +387,64 @@
   </div>
 </div>
 
+<!-- PDF export options -->
+<div class="modal fade" id="exportModal" tabindex="-1" aria-hidden="true" aria-labelledby="exportModalTitle">
+  <div class="modal-dialog">
+    <form class="modal-content" id="exportForm">
+      <div class="modal-header"><h2 class="modal-title h6" id="exportModalTitle">Export PDF report</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p class="small text-secondary mb-3">The report uses the filters that are applied now: <strong id="exportScope"></strong></p>
+        <fieldset class="mb-3">
+          <legend class="form-label small fw-semibold mb-1">Sections</legend>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="section" value="tabOverview" id="exOverview" checked><label class="form-check-label" for="exOverview">Overview</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="section" value="tabTat" id="exTat" checked><label class="form-check-label" for="exTat">Turnaround</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="section" value="tabBacklog" id="exBacklog" checked><label class="form-check-label" for="exBacklog">Backlogs</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" name="section" value="tabSites" id="exSites" checked><label class="form-check-label" for="exSites">Labs &amp; Facilities</label></div>
+        </fieldset>
+        <fieldset class="mb-3">
+          <legend class="form-label small fw-semibold mb-1">Include</legend>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="exTables" checked><label class="form-check-label" for="exTables">The numbers behind each chart (a table under every chart)</label></div>
+          <div class="form-check"><input class="form-check-input" type="checkbox" id="exLists" checked><label class="form-check-label" for="exLists">Lists: high viral load samples, backlog tables, facility scorecard</label></div>
+        </fieldset>
+        <fieldset>
+          <legend class="form-label small fw-semibold mb-1">Page</legend>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Page orientation">
+            <input type="radio" class="btn-check" name="exOrient" id="exPortrait" value="portrait" checked>
+            <label class="btn btn-outline-primary" for="exPortrait">A4 portrait</label>
+            <input type="radio" class="btn-check" name="exOrient" id="exLandscape" value="landscape">
+            <label class="btn btn-outline-primary" for="exLandscape">A4 landscape</label>
+          </div>
+        </fieldset>
+        <div id="exportError" class="alert alert-danger small mt-3 mb-0 d-none" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm btn-link text-decoration-none" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-sm btn-primary" id="btnExportGo">Create PDF</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Covers the page while the report is drawn (all tabs are laid out at once) -->
+<div id="exportOverlay" class="export-overlay d-none" role="status" aria-live="polite">
+  <div class="text-center">
+    <div class="spinner-border mb-3" aria-hidden="true"></div>
+    <div id="exportStatus">Creating the PDF…</div>
+  </div>
+</div>
+
 <div id="tooltip" class="viz-tooltip" role="tooltip"></div>
 
 <script src="lib/bootstrap.bundle.min.js"></script>
 <script src="lib/chart.umd.min.js"></script>
 <script src="lib/xlsx.full.min.js"></script>
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/jspdf.plugin.autotable.min.js"></script>
 <script src="js/xlsx-fast.js"></script>
 <script src="js/data.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/timeline.js"></script>
 <script src="js/app.js"></script>
+<script src="js/report.js"></script>
 </body>
 </html>

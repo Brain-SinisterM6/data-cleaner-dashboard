@@ -1,14 +1,28 @@
 # VL Dashboard
 
-An interactive dashboard for the `_cleaned.xlsx` file produced by `Data-Cleaner.py`.
+An interactive dashboard for InteLIS viral load exports. It reads either the **raw export** straight from InteLIS or the `_cleaned.xlsx` file produced by `Data-Cleaner.py`; both give the same numbers.
 
 ## How to use
 
-1. Run `Data-Cleaner.py` on an InteLIS VL export to get `<name>_cleaned.xlsx`.
-2. Double-click `main.html` (Chrome, Edge or Firefox). No internet and no server needed.
-3. Drag the `_cleaned.xlsx` file onto the page, or click **Choose file**.
+1. Double-click `main.html` (Chrome, Edge or Firefox). No internet and no server needed.
+2. Drag the InteLIS VL export (or its `_cleaned.xlsx`) onto the page, or click **Choose file**.
+3. To share or print, click **Export PDF** (top right).
 
-The file is read inside the browser and never leaves the computer.
+The file is read inside the browser and never leaves the computer. The top bar shows whether the file was a *raw export* or a *cleaned file*.
+
+### Raw exports
+
+Running `Data-Cleaner.py` first is optional. The dashboard reads the text dates in a raw export (`21-08-2026`, `07-09-2026 13:05`, `21/08/2026`, `2026-08-21`) the same way the cleaner converts them, skips banner rows above the headers and blank rows at the end, and applies the same rules listed below.
+
+### Export PDF
+
+**Export PDF** makes an A4 report (portrait or landscape) of the current filter selection, ready to email or print. You choose:
+
+- **Sections**: Overview, Turnaround, Backlogs, Labs & Facilities
+- **The numbers behind each chart**: a table under every chart
+- **Lists**: high viral load samples, backlog month-by-month table, backlog samples still not tested (up to 300, oldest first), facility scorecard
+
+Charts are always drawn in the light theme. Key numbers and tables are real text in the PDF, so you can search and copy them. The file name includes the source file, the filters and the date, e.g. `VL-report_export_June_2026_2026-10-04.pdf`.
 
 ## What's in it
 
@@ -25,7 +39,7 @@ Every chart has a **Table** button that shows the same numbers as a table.
 
 ## How numbers are calculated
 
-The dashboard reads the cleaned data sheet (not the summary sheets), so it can recalculate everything for any filter. It uses the same rules as `Data-Cleaner.py`:
+The dashboard reads the data sheet (not the cleaner's summary sheets), so it can recalculate everything for any filter. It uses the same rules as `Data-Cleaner.py`:
 
 - **Remote** = Remote Sample ID present. **Manual** = Sample ID present, no Remote Sample ID.
 - **Pending** = no *Sample Tested On* date. **Failed** = result contains invalid / error / fail.
@@ -35,7 +49,7 @@ The dashboard reads the cleaned data sheet (not the summary sheets), so it can r
 - Negative day counts (bad dates) are left out of averages and minimums.
 - **Backlog** = collected in a month but not tested in that same month (tested later, or not tested yet). Rejected samples are never backlog. **Transported** = has a Sample Reception Date.
 
-With no filters applied, the totals match the *Statistics* and *Backlogs* sheets of the same file.
+With no filters applied, the totals match the *Statistics* and *Backlogs* sheets that `Data-Cleaner.py` makes from the same export.
 
 ## Files
 
@@ -47,5 +61,6 @@ js/data.js           turns rows into sample records and statistics
 js/charts.js         Chart.js helpers
 js/timeline.js       journey stepper and Timeline views
 js/app.js            upload, filters and tabs
-lib/                 Bootstrap 5.3, Chart.js 4.4, SheetJS 0.18 (bundled for offline use)
+js/report.js         Export PDF
+lib/                 Bootstrap 5.3, Chart.js 4.4, SheetJS 0.18, jsPDF 4.2 + AutoTable 5.0 (bundled for offline use)
 ```
