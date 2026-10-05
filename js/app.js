@@ -784,7 +784,7 @@ const App = (() => {
       if (x === null) return 1; if (y === null) return -1;
       return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir;
     });
-    const maxTotal = Math.max(1, ...rows.map(r => r.total));
+    const maxTotal = rows.reduce((m, r) => Math.max(m, r.total), 1);
     const tbl = $("facTable");
     tbl.replaceChildren();
     const head = tbl.createTHead().insertRow();
@@ -895,7 +895,13 @@ const App = (() => {
     };
     const pick = it => { input.value = it.label; close(); openTimeline(it.kind || currentKind(), it.value, false); };
 
-    input.addEventListener("input", () => { items = suggestions(currentKind(), input.value); active = -1; draw(); });
+    // Each search scans every sample, so wait for a pause in typing on big files.
+    let timer = null;
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => { items = suggestions(currentKind(), input.value); active = -1; draw(); },
+        state.all.length > 50000 ? 200 : 0);
+    });
     input.addEventListener("keydown", e => {
       if (box.classList.contains("d-none")) return;
       if (e.key === "ArrowDown") { active = Math.min(items.length - 1, active + 1); draw(); e.preventDefault(); }

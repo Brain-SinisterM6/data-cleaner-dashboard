@@ -83,6 +83,12 @@ const FastXlsx = (() => {
     const s = i + key.length;
     return tag.slice(s, tag.indexOf('"', s));
   }
+  // V8 keeps a substring of 13+ chars as a view into its parent, so a cell
+  // value sliced out of a 64 KB chunk would keep the whole chunk alive for as
+  // long as the record exists (the entire sheet XML, on a big file). Values
+  // that outlive the parse are copied into their own string.
+  const own = s => (s.length >= 13 ? (" " + s).slice(1) : s);
+
   // Concatenate every <t>…</t> inside a fragment (handles rich-text runs).
   function allText(frag) {
     let out = "", i = 0;
@@ -95,7 +101,7 @@ const FastXlsx = (() => {
       out += frag.slice(gt + 1, end);
       i = end + 4;
     }
-    return unescapeXml(out);
+    return own(unescapeXml(out));
   }
 
   function colIndex(ref) {
@@ -153,13 +159,15 @@ const FastXlsx = (() => {
     const v = body.slice(body.indexOf(">", vs) + 1, body.indexOf("</v>", vs));
     switch (t) {
       case "s": return shared ? shared[+v] ?? null : null;
-      case "str": case "e": case "d": return unescapeXml(v);
+      case "str": case "e": case "d": return own(unescapeXml(v));
       case "b": return v === "1";
-      default: { const n = Number(v); return Number.isNaN(n) ? unescapeXml(v) : n; }
+      default: { const n = Number(v); return Number.isNaN(n) ? own(unescapeXml(v)) : n; }
     }
   }
 
-  function parseRow(rowXml, shared) {
+  // want: optional array, want[col] truthy for the columns to read; other
+  // cells are skipped without decoding their value.
+  function parseRow(rowXml, shared, want) {
     const out = [];
     let i = 0, next = 0;
     while ((i = rowXml.indexOf("<c", i)) !== -1) {
@@ -178,7 +186,7 @@ const FastXlsx = (() => {
         i = end + 4;
       }
       next = col + 1;
-      if (!body) continue;
+      if (!body || (want && !want[col])) continue;
       const val = cellValue(tag, body, shared);
       if (val === null || val === "") continue;
       while (out.length < col) out.push(null);
@@ -189,17 +197,21 @@ const FastXlsx = (() => {
 
   /**
    * Stream a sheet's rows. onProgress(fraction) is called between chunks.
-   * Returns an array of row arrays; missing rows are kept as empty arrays so
-   * row numbers line up with Excel's.
+   * Each row array goes to onRow(row) as soon as it is parsed (nothing is
+   * kept, so memory stays flat on huge sheets); missing rows are passed as
+   * empty arrays so row numbers line up with Excel's. stop() returning true
+   * ends the read early. wantCols() may return an array marking the only
+   * columns worth decoding (null = all). Without onRow, returns every row.
    */
-  async function readSheetRows(book, sheet, onProgress) {
+  async function readSheetRows(book, sheet, onProgress, onRow = null, stop = () => false, wantCols = () => null) {
     const e = book.zip.entries.get(sheet.path);
     const stream = entryStream(book.u8, book.zip, sheet.path);
     if (!stream) throw new Error("sheet not found: " + sheet.name);
     const reader = stream.getReader();
     const dec = new TextDecoder("utf-8");
     const rows = [];
-    let buf = "", seen = 0, lastYield = performance.now();
+    const emit = onRow || (row => rows.push(row));
+    let buf = "", seen = 0, count = 0, lastYield = performance.now();
 
     const flush = final => {
       let i = 0;
@@ -216,9 +228,10 @@ const FastXlsx = (() => {
           e2 = close + 6; rowXml = buf.slice(tagEnd + 1, close);
         }
         const rAttr = quickAttr(buf.slice(s, tagEnd + 1), ' r="');
-        const rowNum = rAttr ? +rAttr : rows.length + 1;
-        while (rows.length < rowNum - 1) rows.push([]);
-        rows.push(rowXml ? parseRow(rowXml, book.shared) : []);
+        const rowNum = rAttr ? +rAttr : count + 1;
+        while (count < rowNum - 1) { emit([]); count++; }
+        emit(rowXml ? parseRow(rowXml, book.shared, wantCols()) : []);
+        count++;
         i = e2;
       }
       buf = final ? "" : buf.slice(i);
@@ -230,6 +243,7 @@ const FastXlsx = (() => {
       seen += value.length;
       buf += dec.decode(value, { stream: true });
       flush(false);
+      if (stop()) { reader.cancel(); return rows; }
       if (performance.now() - lastYield > 60) {
         if (onProgress && e.usize) onProgress(Math.min(1, seen / e.usize));
         await new Promise(r => setTimeout(r, 0));

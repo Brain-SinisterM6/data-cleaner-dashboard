@@ -67,11 +67,23 @@ const VLData = (() => {
   // ---- dates as Excel serial numbers (days since 1899-12-30), no time zones ----
   const TEXT_DATE = /^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/;
 
+  // Text dates repeat across thousands of rows; parse each distinct one once.
+  const dateCache = new Map();
   function toSerial(v) {
     if (blank(v)) return null;
     if (typeof v === "number") return v > 0 ? v : null;
     if (v instanceof Date) return v.getTime() / 86400000 + 25569;
-    const m = String(v).trim().match(TEXT_DATE);
+    const key = String(v);
+    let s = dateCache.get(key);
+    if (s === undefined) {
+      if (dateCache.size > 200000) dateCache.clear();
+      s = parseTextDate(key);
+      dateCache.set(key, s);
+    }
+    return s;
+  }
+  function parseTextDate(text) {
+    const m = text.trim().match(TEXT_DATE);
     if (!m) return null;
     let [, a, b, c, hh = 0, mm = 0, ss = 0] = m;
     let y, mo, d;
@@ -101,6 +113,11 @@ const VLData = (() => {
     const d = serialToDate(s);
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
   }
+  function serialMonthNo(s) {
+    const d = serialToDate(s);
+    return d.getUTCFullYear() * 12 + d.getUTCMonth();
+  }
+  const REJECTED_YES = /^(yes|y|oui|true|1)$/i;
   function monthLabel(key, short = false) {
     const [y, m] = key.split("-").map(Number);
     const name = MONTHS[m - 1];
@@ -129,27 +146,34 @@ const VLData = (() => {
   }
 
   // ---- stats helpers ----
+  // Plain loops, never Math.min(...arr): spreading a large array overflows the
+  // call stack (~100k+ values), and these run over every sample.
   function avgNonNeg(values) {
-    const v = values.filter(x => x !== null && x >= 0);
-    return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 10) / 10 : null;
+    let sum = 0, n = 0;
+    for (const x of values) if (x !== null && x >= 0) { sum += x; n++; }
+    return n ? Math.round((sum / n) * 10) / 10 : null;
   }
-  function minNonNeg(values) {
-    const v = values.filter(x => x !== null && x >= 0);
-    return v.length ? Math.min(...v) : null;
+
+  /** Running n / avg / min / max / negatives for one day-count field. */
+  function newAgg() { return { n: 0, sum: 0, pos: 0, min: null, max: null, negatives: 0 }; }
+  function addAgg(a, x) {
+    if (x === null) return;
+    a.n++;
+    if (a.max === null || x > a.max) a.max = x;
+    if (x < 0) { a.negatives++; return; }
+    a.sum += x; a.pos++;
+    if (a.min === null || x < a.min) a.min = x;
   }
-  function maxOf(values) {
-    const v = values.filter(x => x !== null);
-    return v.length ? Math.max(...v) : null;
+  function finishAgg(a) {
+    return { n: a.n, avg: a.pos ? Math.round((a.sum / a.pos) * 10) / 10 : null, min: a.min, max: a.max, negatives: a.negatives };
   }
 
   // ---- workbook parsing ----
-  function findHeaderRow(rows) {
-    // The cleaner expects headers in row 1, but tolerate a banner row or two.
-    for (let i = 0; i < Math.min(rows.length, 10); i++) {
-      const cells = (rows[i] || []).map(c => String(c ?? "").trim().toLowerCase());
-      if (cells.includes("sample id") || cells.includes("remote sample id")) return i;
-    }
-    return -1;
+  // The cleaner expects headers in row 1, but tolerate a banner row or two.
+  const HEADER_SEARCH_ROWS = 10;
+  function isHeaderRow(row) {
+    const cells = (row || []).map(c => String(c ?? "").trim().toLowerCase());
+    return cells.includes("sample id") || cells.includes("remote sample id");
   }
 
   function mapColumns(header) {
@@ -165,9 +189,20 @@ const VLData = (() => {
     return idx;
   }
 
+  // Lab, facility, sex... repeat on every row. Sharing one string per distinct
+  // value keeps memory flat on million-row files.
+  const pool = new Map();
+  const intern = v => {
+    if (v.length > 64) return v;
+    let x = pool.get(v);
+    if (x === undefined) { pool.set(v, v); x = v; }
+    return x;
+  };
+
   function buildRecord(row, idx, sheetName, rowNumber) {
     const get = k => (idx[k] >= 0 ? row[idx[k]] : null);
     const str = k => { const v = get(k); return blank(v) ? "" : String(v).trim(); };
+    const cat = k => intern(str(k));
 
     const sampleId = str("sampleId");
     const remoteId = str("remoteId");
@@ -182,8 +217,9 @@ const VLData = (() => {
     const vl = idx.resultCp >= 0 ? parseVL(resultCp) : null;
     const failed = hasFailure(resultCp) || hasFailure(resultLog);
 
-    const facilityName = str("facility");
-    const facilityCode = str("facilityCode");
+    const facilityName = cat("facility");
+    const rejected = cat("rejected");
+    const facilityCode = cat("facilityCode");
 
     return {
       key: `${sheetName}#${rowNumber}`,
@@ -192,20 +228,27 @@ const VLData = (() => {
       sampleId, remoteId,
       id: sampleId || remoteId || str("sno") || `Row ${rowNumber}`,
       entry: isRemote ? "Remote" : isManual ? "Manual" : "Unknown",
-      lab: str("lab") || "N/A",
+      lab: cat("lab") || "N/A",
       facility: facilityName || facilityCode || "N/A",
       facilityCode,
-      district: str("district"),
-      region: str("region"),
+      district: cat("district"),
+      region: cat("region"),
       patientId: str("patientId"),
-      sex: str("sex"),
-      age: str("age"),
-      sampleType: str("sampleType"),
-      indication: str("indication"),
-      rejected: str("rejected"),
-      ...d,
+      sex: cat("sex"),
+      age: cat("age"),
+      sampleType: cat("sampleType"),
+      indication: cat("indication"),
+      rejected,
+      created: d.created, collected: d.collected, received: d.received, tested: d.tested, printed: d.printed,
       month: d.collected !== null ? monthKey(d.collected) : null,
       testedMonth: d.tested !== null ? monthKey(d.tested) : null,
+      // Month numbers (year * 12 + month) and the rejected flag, worked out once
+      // here because the backlog figures check them several times per sample.
+      monthNo: d.collected !== null ? serialMonthNo(d.collected) : null,
+      testedMonthNo: d.tested !== null ? serialMonthNo(d.tested) : null,
+      isRejected: REJECTED_YES.test(rejected),
+      rejectedAny: /^y/i.test(rejected),   // looser rule used by the status counts
+      tnd: !blank(resultCp) && /not detected|tnd/i.test(String(resultCp)),
       resultText: blank(resultCp) ? "" : String(resultCp).trim(),
       resultLog: blank(resultLog) ? "" : String(resultLog).trim(),
       vl,
@@ -223,34 +266,50 @@ const VLData = (() => {
 
   const isSummary = name => SUMMARY_SHEETS.has(name.trim().toLowerCase());
 
-  /** Turn {name, rows}[] into records. */
-  function recordsFromSheets(sheetRows, hasSummary) {
-    const records = [];
-    const usedSheets = [];
-    const missing = new Set();
+  /**
+   * Turns one sheet's rows into records as they arrive, so a large sheet never
+   * has to be held as raw rows and records at the same time.
+   * add(row) takes rows in sheet order, starting at row 1.
+   */
+  function sheetCollector(name, out) {
+    let idx = null, want = null, rowNumber = 0;
+    return {
+      add(row) {
+        rowNumber++;
+        if (idx === null) {
+          if (rowNumber <= HEADER_SEARCH_ROWS && isHeaderRow(row)) {
+            idx = mapColumns(row);
+            want = [];
+            for (const j of Object.values(idx)) if (j >= 0) want[j] = true;
+            out.used.push(name);
+            for (const k of ["lab", "facility", "collected", "tested", "resultCp"]) {
+              if (idx[k] === -1) out.missing.add(COLS[k][0]);
+            }
+          }
+          return;
+        }
+        if (!row || !row.length || row.every(blank)) return;
+        out.records.push(buildRecord(row, idx, name, rowNumber));
+      },
+      // No header in the first rows: not a data sheet, stop reading it.
+      skip: () => idx === null && rowNumber >= HEADER_SEARCH_ROWS,
+      // Once the header is known, only the mapped columns need decoding.
+      want: () => want,
+    };
+  }
 
-    for (const { name, rows } of sheetRows) {
-      const h = findHeaderRow(rows);
-      if (h === -1) continue;
-      const idx = mapColumns(rows[h]);
-      for (const k of ["lab", "facility", "collected", "tested", "resultCp"]) {
-        if (idx[k] === -1) missing.add(COLS[k][0]);
-      }
-      usedSheets.push(name);
-      for (let r = h + 1; r < rows.length; r++) {
-        const row = rows[r];
-        if (!row || !row.length || row.every(blank)) continue;
-        records.push(buildRecord(row, idx, name, r + 1));
-      }
-    }
+  function newOutput() { return { records: [], used: [], missing: new Set() }; }
 
-    if (!usedSheets.length) {
+  function finishOutput(out, hasSummary) {
+    pool.clear();
+    dateCache.clear();
+    if (!out.used.length) {
       throw new Error("No sample data found. Use an InteLIS VL export or the _cleaned.xlsx made by Data-Cleaner.py " +
         "(it needs a sheet with a \"Sample ID\" or \"Remote Sample ID\" column).");
     }
     // The cleaner always adds its summary sheets, so without them this is a raw export.
     const source = hasSummary ? "cleaned" : "raw";
-    return { records, sheets: usedSheets, missing: [...missing], hasSummary, source };
+    return { records: out.records, sheets: out.used, missing: [...out.missing], hasSummary, source };
   }
 
   /** SheetJS path: handles every format (.xls too) but blocks while parsing. */
@@ -264,11 +323,14 @@ const VLData = (() => {
       type: "array", sheets: wanted, dense: true,
       cellDates: false, cellText: false, cellNF: false, cellStyles: false, cellHTML: false,
     });
-    const sheetRows = wanted.filter(n => wb.Sheets[n]).map(name => ({
-      name,
-      rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: true }),
-    }));
-    return recordsFromSheets(sheetRows, names.length > wanted.length);
+    const out = newOutput();
+    for (const name of wanted.filter(n => wb.Sheets[n])) {
+      const col = sheetCollector(name, out);
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null, blankrows: true });
+      for (const row of rows) { col.add(row); if (col.skip()) break; }
+      delete wb.Sheets[name];   // free the sheet before the next one
+    }
+    return finishOutput(out, names.length > wanted.length);
   }
 
   /**
@@ -286,12 +348,12 @@ const VLData = (() => {
     if (book) {
       const wanted = book.sheets.filter(s => !isSummary(s.name));
       try {
-        const sheetRows = [];
+        const out = newOutput();
         for (let i = 0; i < wanted.length; i++) {
-          const rows = await FastXlsx.readSheetRows(book, wanted[i], f => onProgress((i + f) / wanted.length));
-          sheetRows.push({ name: wanted[i].name, rows });
+          const col = sheetCollector(wanted[i].name, out);
+          await FastXlsx.readSheetRows(book, wanted[i], f => onProgress((i + f) / wanted.length), col.add, col.skip, col.want);
         }
-        return recordsFromSheets(sheetRows, book.sheets.length > wanted.length);
+        return finishOutput(out, book.sheets.length > wanted.length);
       } catch (err) {
         if (/No sample data found/.test(err.message)) throw err;
         console.warn("Fast reader failed, falling back to SheetJS:", err);
@@ -308,7 +370,7 @@ const VLData = (() => {
       tested: 0, notTransported: 0, rejected: 0,
       suppressed: 0, tnd: 0, otherResult: 0,
     };
-    const tr = [], tat = [], disp = [], val = [], inLab = [];
+    const tr = newAgg(), tat = newAgg(), disp = newAgg(), val = newAgg(), inLab = newAgg();
     for (const r of recs) {
       if (r.entry === "Remote") s.remote++;
       else if (r.entry === "Manual") s.manual++;
@@ -316,29 +378,23 @@ const VLData = (() => {
       if (r.failed) s.failed++;
       if (r.highVl) s.highVl++;
       if (r.notTransported) s.notTransported++;
-      if (/^y/i.test(r.rejected)) s.rejected++;
+      if (r.rejectedAny) s.rejected++;
       if (!r.pending && !r.failed && !r.highVl) {
         if (r.vl !== null) s.suppressed++;
-        else if (/not detected|tnd/i.test(r.resultText)) s.tnd++;
+        else if (r.tnd) s.tnd++;
         else s.otherResult++;
       }
-      tr.push(r.transport); tat.push(r.tat); disp.push(r.dispatch); val.push(r.validation); inLab.push(r.inLab);
+      addAgg(tr, r.transport); addAgg(tat, r.tat); addAgg(disp, r.dispatch); addAgg(val, r.validation); addAgg(inLab, r.inLab);
     }
-    const agg = arr => ({
-      n: arr.filter(x => x !== null).length,
-      avg: avgNonNeg(arr), min: minNonNeg(arr), max: maxOf(arr),
-      negatives: arr.filter(x => x !== null && x < 0).length,
-    });
-    s.transportStats = agg(tr);
-    s.tatStats = agg(tat);
-    s.dispatchStats = agg(disp);
-    s.validationStats = agg(val);
-    s.inLabStats = agg(inLab);
+    s.transportStats = finishAgg(tr);
+    s.tatStats = finishAgg(tat);
+    s.dispatchStats = finishAgg(disp);
+    s.validationStats = finishAgg(val);
+    s.inLabStats = finishAgg(inLab);
     return s;
   }
 
   // ---- backlogs (same rules as compute_backlog_data in Data-Cleaner.py) ----
-  const isRejected = r => /^(yes|y|oui|true|1)$/i.test(r.rejected);
   const monthIdx = key => { const [y, m] = key.split("-").map(Number); return y * 12 + m - 1; };
   const idxToKey = i => `${Math.floor(i / 12)}-${String(i % 12 + 1).padStart(2, "0")}`;
 
@@ -349,18 +405,16 @@ const VLData = (() => {
 
   /** How one record counts toward its collection month's backlog, or null if it doesn't. */
   function backlogStatus(r) {
-    if (r.month === null || isRejected(r)) return null;
-    const c = monthIdx(r.month);
-    const t = r.testedMonth !== null ? monthIdx(r.testedMonth) : null;
+    if (r.monthNo === null || r.isRejected) return null;
+    const c = r.monthNo, t = r.testedMonthNo;
     // A test date before collection is a data error; treat it as tested in time.
     if (t !== null && t <= c) return null;
     return t === null ? "pending" : t === c + 1 ? "next" : "later";
   }
 
-  function addToBacklog(b, r) {
+  function addToBacklog(b, r, st) {
     b.collected++;
-    if (isRejected(r)) { b.rejected++; return; }
-    const st = backlogStatus(r);
+    if (r.isRejected) { b.rejected++; return; }
     if (st === null) { b.testedSameMonth++; return; }
     b.backlog++;
     if (r.received !== null) b.transported++; else b.notTransported++;
@@ -381,14 +435,14 @@ const VLData = (() => {
     for (const r of recs) {
       if (r.month === null) continue;
       if (!byMonth.has(r.month)) byMonth.set(r.month, newBacklogBucket());
-      addToBacklog(byMonth.get(r.month), r);
-      addToBacklog(total, r);
-      if (lastMonth === null) {
-        maxIdx = Math.max(maxIdx, monthIdx(r.month), r.testedMonth !== null ? monthIdx(r.testedMonth) : -Infinity);
-      }
       const st = backlogStatus(r);
+      addToBacklog(byMonth.get(r.month), r, st);
+      addToBacklog(total, r, st);
+      if (lastMonth === null) {
+        maxIdx = Math.max(maxIdx, r.monthNo, r.testedMonthNo !== null ? r.testedMonthNo : -Infinity);
+      }
       if (st !== null) {
-        const next = monthIdx(r.month) + 1;
+        const next = r.monthNo + 1;
         if (!carry.has(next)) carry.set(next, { backlog: 0, tested: 0 });
         const c = carry.get(next);
         c.backlog++;

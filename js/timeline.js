@@ -206,7 +206,7 @@ const Timeline = (() => {
           const sc = Charts.scales({ logY: true, yTitle: "cp/mL" });
           // Keep the 1000 cp/mL line mid-chart and "not detected" on the floor.
           sc.y.min = FLOOR;
-          sc.y.max = Math.max(100000, ...values.map(x => x * 10));
+          sc.y.max = values.reduce((m, x) => Math.max(m, x * 10), 100000);
           sc.x.offset = true;
           sc.y.ticks.callback = v => ([10, 100, 1000, 10000, 100000, 1e6, 1e7, 1e8].includes(v) ? v.toLocaleString() : "");
           return sc;
@@ -241,9 +241,13 @@ const Timeline = (() => {
   function entityView(kind, name, allRecords) {
     const recs = allRecords.filter(r => (kind === "lab" ? r.lab : r.facility) === name);
     const s = summarize(recs);
-    const dated = recs.filter(r => r.collected !== null).map(r => r.collected);
-    const firstD = dated.length ? Math.min(...dated) : null;
-    const lastD = dated.length ? Math.max(...dated) : null;
+    // A loop, not Math.min(...): a lab can have hundreds of thousands of samples.
+    let firstD = null, lastD = null;
+    for (const r of recs) {
+      if (r.collected === null) continue;
+      if (firstD === null || r.collected < firstD) firstD = r.collected;
+      if (lastD === null || r.collected > lastD) lastD = r.collected;
+    }
 
     const wrap = h("div", {});
     const other = kind === "lab"
